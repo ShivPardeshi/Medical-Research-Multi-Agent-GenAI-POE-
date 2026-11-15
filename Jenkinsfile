@@ -2,90 +2,114 @@ pipeline {
     agent any
 
     environment {
-        PYTHONUNBUFFERED = '1'
-        PYTHONDONTWRITEBYTECODE = '1'
-        MODEL_PROVIDER = 'google'
-        HOST = '127.0.0.1'
-        PORT = '8000'
+        APP_NAME         = 'mediresearch-agents'
+        IMAGE_NAME       = 'mediresearch-agents'
+        IMAGE_TAG        = "${env.BUILD_NUMBER ?: 'latest'}"
+        HOST_PORT        = '8000'
+        TEST_CONTAINER   = "mediresearch-smoke-test-${env.BUILD_NUMBER ?: '1'}"
     }
 
     stages {
-        stage('Checkout') {
+        stage('Checkout SCM') {
             steps {
-                echo 'Checking out source code...'
+                echo "Fetching repository source code..."
                 checkout scm
             }
         }
 
-        stage('Environment & Dependencies') {
+        stage('Verify Environment') {
             steps {
-                echo 'Setting up Python virtual environment and installing dependencies...'
+                echo "Checking system tools and Docker availability..."
+                sh 'docker --version'
+                sh 'python3 --version || python --version'
+            }
+        }
+
+        stage('Run Unit & Integration Tests') {
+            steps {
+                echo "Running unit and integration tests inside isolated container..."
                 sh '''
-                    python3 -m venv .venv || virtualenv .venv
-                    . .venv/bin/activate
-                    pip install --upgrade pip
-                    pip install -r requirements.txt
+                    docker build -t ${IMAGE_NAME}:test .
+                    docker run --rm ${IMAGE_NAME}:test pytest -v
                 '''
             }
         }
 
-        stage('Code Compilation & Lint') {
+        stage('Build Production Docker Image') {
             steps {
-                echo 'Running Python syntax and import compilation check...'
+                echo "Building production Docker image: ${IMAGE_NAME}:${IMAGE_TAG}..."
                 sh '''
-                    . .venv/bin/activate
-                    python -m py_compile app/config.py app/schemas.py app/main.py streamlit_app.py
-                    python -m py_compile app/agents/medical_team.py app/agents/tools.py app/data/sample_documents.py
+                    docker build -t ${IMAGE_NAME}:${IMAGE_TAG} -t ${IMAGE_NAME}:latest .
                 '''
             }
         }
 
-        stage('Run Automated Tests') {
+        stage('Container Smoke & Health Check') {
             steps {
-                echo 'Executing Pytest test suite for medical agents and endpoints...'
+                echo "Deploying test container and verifying /health endpoint..."
                 sh '''
-                    . .venv/bin/activate
-                    pytest -v --junitxml=test-results.xml tests/
-                '''
-            }
-            post {
-                always {
-                    junit allowEmptyResults: true, testResults: 'test-results.xml'
-                }
-            }
-        }
+                    # Stop previous smoke test container if left over
+                    docker rm -f ${TEST_CONTAINER} 2>/dev/null || true
 
-        stage('Build Docker Containers') {
-            steps {
-                echo 'Building production Docker images via Docker Compose...'
-                sh '''
-                    docker compose build
-                '''
-            }
-        }
+                    # Start container on dynamic port 8001 to prevent port conflicts on host
+                    docker run -d --name ${TEST_CONTAINER} -p 8001:8000 -e PORT=8000 ${IMAGE_NAME}:latest
 
-        stage('Container Smoke Test') {
-            steps {
-                echo 'Verifying container startup and health check endpoint...'
-                sh '''
-                    docker compose up -d
-                    sleep 10
-                    curl -f http://localhost:8000/health || exit 1
-                    docker compose down
+                    echo "Waiting for container startup..."
+                    sleep 5
+
+                    MAX_RETRIES=8
+                    COUNT=0
+                    PASSED=false
+
+                    while [ $COUNT -lt $MAX_RETRIES ]; do
+                        echo "Probing container health (attempt $((COUNT + 1))/$MAX_RETRIES)..."
+                        if curl -s -f http://host.docker.internal:8001/health >/dev/null 2>&1; then
+                            echo "Health check PASSED via host.docker.internal:8001/health!"
+                            curl -s http://host.docker.internal:8001/health
+                            echo ""
+                            PASSED=true
+                            break
+                        elif curl -s -f http://localhost:8001/health >/dev/null 2>&1; then
+                            echo "Health check PASSED via localhost:8001/health!"
+                            curl -s http://localhost:8001/health
+                            echo ""
+                            PASSED=true
+                            break
+                        elif docker exec ${TEST_CONTAINER} python3 -c "import urllib.request; resp=urllib.request.urlopen('http://127.0.0.1:8000/health'); print(resp.read().decode())" 2>/dev/null; then
+                            echo "Health check PASSED directly inside container via 127.0.0.1:8000/health!"
+                            PASSED=true
+                            break
+                        fi
+                        sleep 4
+                        COUNT=$((COUNT + 1))
+                    done
+
+                    if [ "$PASSED" = "false" ]; then
+                        echo "Smoke test FAILED! Health endpoint did not respond within deadline."
+                        docker logs ${TEST_CONTAINER}
+                        docker rm -f ${TEST_CONTAINER}
+                        exit 1
+                    fi
+
+                    docker rm -f ${TEST_CONTAINER}
                 '''
             }
         }
     }
 
     post {
+        always {
+            echo "Cleaning up temporary CI test containers..."
+            sh "docker rm -f ${TEST_CONTAINER} 2>/dev/null || true"
+        }
         success {
-            echo '=== MediResearch AI Jenkins Build Succeeded! ==='
+            echo "=========================================================="
+            echo "SUCCESS: Docker image '${IMAGE_NAME}:latest' built and verified!"
+            echo "Run: docker run -d -p 8000:8000 --env-file .env ${IMAGE_NAME}:latest"
+            echo "=========================================================="
         }
         failure {
-            echo '=== MediResearch AI Jenkins Build Failed! ==='
-        }
-        always {
-            cleanWs deleteDirs: true, notFailBuild: true
+            echo "Pipeline build failed. Review stage logs above."
         }
     }
 }

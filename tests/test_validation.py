@@ -41,6 +41,7 @@ def test_ask_missing_api_key(monkeypatch):
 def test_ask_success_with_mocked_workflow(monkeypatch):
     """Verify successful response formatting when LLM and workflow return an answer."""
     monkeypatch.setattr("app.config.GROQ_API_KEY", "mock_valid_key_123")
+    monkeypatch.setattr("app.config.GEMINI_API_KEY", "mock_valid_key_123")
 
     mock_result = {
         "answer": "SGLT2 inhibitors and Metformin are recommended first-line agents in T2D with CKD.",

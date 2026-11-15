@@ -10,6 +10,7 @@ COPY requirements.txt /app/requirements.txt
 RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir -r requirements.txt
 COPY app/ /app/app/
+COPY tests/ /app/tests/
 COPY streamlit_app.py /app/streamlit_app.py
 EXPOSE 8000 8501
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
