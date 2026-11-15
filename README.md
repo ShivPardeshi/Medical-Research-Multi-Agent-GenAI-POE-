@@ -260,6 +260,179 @@ Submits a clinical inquiry to the 3-agent pipeline:
 
 ***
 
+## 🔄 End-to-End System Architecture (DevOps, Docker, Jenkins & AWS)
+
+This section illustrates the complete end-to-end lifecycle of the system—from local development to GitHub, automated Jenkins CI/CD, Docker containerization, AWS cloud hosting, multi-agent LLM inference, and end-user access.
+
+### 1. Vertical System Flowchart (Top-to-Bottom)
+
+```mermaid
+flowchart TD
+    %% 1. Developer Layer
+    subgraph L1["1. DEVELOPER WORKSPACE (LOCAL MACHINE)"]
+        DEV["Developer Workspace\n• FastAPI + Streamlit Code\n• 3 Agno Agents + Clinical Library\n• Dockerfile & Jenkinsfile"]
+    end
+
+    %% 2. Source Control
+    subgraph L2["2. SOURCE CONTROL (GITHUB)"]
+        GIT[("GitHub Repository\nbranch: main")]
+    end
+
+    %% 3. CI/CD Layer
+    subgraph L3["3. CI/CD AUTOMATION (JENKINS PIPELINE)"]
+        direction TB
+        J1["Stage 1: Checkout SCM"]
+        J2["Stage 2: Run Unit & Integration Tests (12 Passed)"]
+        J3["Stage 3: Docker Build (mediresearch-agents:latest)"]
+        J4["Stage 4: Container Smoke Test (Probe /health on 8001)"]
+        J1 --> J2 --> J3 --> J4
+    end
+
+    %% 4. Registry Layer
+    subgraph L4["4. CONTAINER REGISTRY (AWS ECR / DOCKER HUB)"]
+        REG[("Docker Registry (AWS ECR)\nStores verified production image")]
+    end
+
+    %% 5. Cloud Hosting Layer
+    subgraph L5["5. CLOUD RUNTIME (AWS EC2 / ECS CLUSTER)"]
+        direction TB
+        ALB["AWS Application Load Balancer (ALB)"]
+        
+        subgraph DOCKER_HOST["Docker Host (Container Runtime)"]
+            C_API["Container 1: FastAPI API + Web UI\n(Port 8000)"]
+            C_ST["Container 2: Streamlit Clinical UI\n(Port 8501)"]
+        end
+        
+        ALB -->|Port 80/443 -> 8000| C_API
+        ALB -->|Port 8501| C_ST
+    end
+
+    %% 6. GenAI & Multi-Agent Layer
+    subgraph L6["6. GENAI MULTI-AGENT CORE"]
+        direction LR
+        A1["Agent 1\nQuery Analyzer"] --> A2["Agent 2\nResearch Agent"] --> A3["Agent 3\nSafety Auditor"]
+        KB[("Clinical Knowledge Base\nADA, ACC/AHA, IDSA, GOLD")] <--> A2
+        LLM["Google Gemini / Groq API"] <--> A1 & A2 & A3
+    end
+
+    %% 7. Users Layer
+    subgraph L7["7. END USERS"]
+        USERS["Clinicians / Researchers / Patients\n(Web Browser)"]
+    end
+
+    %% Connections Top-Down
+    DEV -->|git push origin main| GIT
+    GIT -->|Webhook / Poll Trigger| J1
+    J4 -->|docker push (Image)| REG
+    REG -->|docker pull| DOCKER_HOST
+    C_API & C_ST <--> L6
+    USERS <-->|HTTPS Requests| ALB
+```
+
+### 2. Paper Blueprint (How to Sketch on Paper)
+
+Use this top-to-bottom layout when sketching the architecture on paper or a whiteboard:
+
+```text
+===================================================================
+TOP OF PAGE
+===================================================================
+
+       +---------------------------------------------------+
+  (1)  |              DEVELOPER WORKSPACE                  |
+       |  - Python code, Dockerfile, Jenkinsfile           |
+       +-------------------------+-------------------------+
+                                 |
+                                 |  git push origin main
+                                 v
+       +---------------------------------------------------+
+  (2)  |               GITHUB REPOSITORY                   |
+       |  - Remote repository: main branch                 |
+       +-------------------------+-------------------------+
+                                 |
+                                 |  Webhook trigger
+                                 v
+       +---------------------------------------------------+
+  (3)  |               JENKINS CI/CD SERVER                |
+       |                                                   |
+       |  [1. Checkout SCM]                                |
+       |          |                                        |
+       |  [2. Run Pytest] (12/12 passed)                   |
+       |          |                                        |
+       |  [3. Docker Build] (mediresearch-agents:latest)   |
+       |          |                                        |
+       |  [4. Smoke Test] (Probes /health endpoint)        |
+       +-------------------------+-------------------------+
+                                 |
+                                 |  docker push
+                                 v
+       +---------------------------------------------------+
+  (4)  |            AWS ECR (CONTAINER REGISTRY)           |
+       |  - Stores versioned production Docker image       |
+       +-------------------------+-------------------------+
+                                 |
+                                 |  docker pull
+                                 v
+       +---------------------------------------------------+
+  (5)  |              AWS CLOUD (EC2 / ECS)                |
+       |                                                   |
+       |  +---------------------+   +--------------------+ |
+       |  | Container 1:        |   | Container 2:       | |
+       |  | FastAPI API (8000)  |   | Streamlit (8501)   | |
+       |  +----------+----------+   +---------+----------+ |
+       +-------------|------------------------|------------+
+                     |                        |
+                     +------------+-----------+
+                                  |
+                                  v
+       +---------------------------------------------------+
+  (6)  |            GENAI MULTI-AGENT ENGINE               |
+       |                                                   |
+       |  [Agent 1]  --->   [Agent 2]   --->   [Agent 3]   |
+       |  Analyzer          Researcher         Auditor     |
+       |                        ^                          |
+       |                        |                          |
+       |            [( Clinical Knowledge Base )]          |
+       |            [ ADA, ACC/AHA, IDSA, GOLD  ]          |
+       |                        ^                          |
+       |                        |                          |
+       |              [ Gemini / Groq API ]                |
+       +--------------------------^------------------------+
+                                  |
+                                  |  HTTPS Responses
+                                  v
+       +---------------------------------------------------+
+  (7)  |               DOCTORS & RESEARCHERS               |
+       |  - Interacting via Browser on Port 8000 & 8501    |
+       +---------------------------------------------------+
+
+===================================================================
+BOTTOM OF PAGE
+===================================================================
+```
+
+### 3. Step-by-Step Architecture Walkthrough
+
+1. **Developer Workstation**: Code is developed locally using Python, FastAPI, Streamlit, and Agno multi-agent systems, encapsulated with a multi-stage `Dockerfile` and automated `Jenkinsfile`.
+2. **GitHub Repository**: Code changes are committed and pushed to the remote repository `https://github.com/ShivPardeshi/Medical-Research-Multi-Agent-GenAI-POE-.git`.
+3. **Jenkins CI/CD Pipeline**: Jenkins pulls the updated codebase and runs a 5-stage declarative pipeline:
+   - **Checkout SCM**: Clones the latest commit.
+   - **Environment Verification**: Validates Python, Docker daemon, and environment requirements.
+   - **Automated Testing**: Runs 12 automated unit/integration tests using Pytest.
+   - **Docker Build**: Builds production image `mediresearch-agents:latest`.
+   - **Smoke & Health Check**: Starts an isolated test container, curls `/health`, confirms readiness, and tears down the test container.
+4. **AWS ECR (Elastic Container Registry)**: The validated container image is pushed to AWS ECR as an immutable release artifact.
+5. **AWS ECS / EC2 Cluster**: AWS pulls the container image and runs the services using Docker Compose or ECS task definitions:
+   - **FastAPI Service** (Port 8000): Handles high-concurrency API calls, validation, and single-page web UI.
+   - **Streamlit Dashboard** (Port 8501): Provides interactive clinical experimentation, parameter controls, and multimodal file uploads.
+6. **Multi-Agent GenAI Execution**: Inquiries trigger the 3-agent pipeline:
+   - **Agent 1 (Query Analyzer)** extracts clinical biomarkers and specialty domains.
+   - **Agent 2 (Research Agent)** executes tool queries against the grounded clinical knowledge base.
+   - **Agent 3 (Safety Auditor)** verifies contraindications, drug interactions, and adds clinical disclaimers.
+7. **End Users**: Clinicians, researchers, and healthcare professionals securely interact with the system via web browsers routed through an AWS Application Load Balancer (ALB).
+
+***
+
 ## ⚖️ Clinical Disclaimer
 
 > **IMPORTANT:** MediResearch AI is an evidence-based clinical intelligence and research assistant designed for educational and informational analysis. It does not provide medical diagnoses, formulate definitive treatment plans, or establish a physician-patient relationship. Healthcare professionals must exercise independent clinical discretion, and patients must always consult a licensed medical practitioner for personalized healthcare guidance.
