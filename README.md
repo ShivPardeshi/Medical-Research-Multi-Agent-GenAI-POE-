@@ -1,4 +1,4 @@
-# MediResearch AI — Multi-Agent Medical Researcher 🩺🔬
+# MediResearch AI - Multi-Agent Medical Researcher 🩺🔬
 
 **MediResearch AI** is an advanced, evidence-based multi-agent clinical research assistant designed for biomedical intelligence, clinical inquiry triage, and pharmacotherapy safety analysis. Built using **FastAPI**, the **Agno framework** multi-agent teams, and dual LLM support (**Google Gemini 2.5 Flash** with high TPM multimodal image analysis and **Groq** fallback running fast open-weight models), it delivers peer-reviewed medical guidance through both a modern web application and an interactive Streamlit dashboard.
 
